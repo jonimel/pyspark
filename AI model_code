@@ -1,0 +1,143 @@
+#import libraries
+
+import pandas as pd
+import findspark
+findspark.init()
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
+from pyspark.ml.feature import StringIndexer
+from pyspark.sql.functions import *
+
+#file uploading
+
+spark = SparkSession.builder.appName("LoadCSV").getOrCreate()
+df = spark.read.csv(
+    path="C:/Users/jonij/data_1.csv",
+    sep=",",
+    header=True,
+    quote="",
+    inferSchema=True,
+    )
+
+# insert columns based on conditions
+df = df.withColumn("avg_of_purchases",(col('purchase1')+ col('purchase2')+ col('purchase3')+ col('purchase4')+ col('purchase5'))/5)
+df = df.withColumn('high/low', when(((col("avg_of_purchases")>= 5400)), lit('High')).otherwise(lit('low')))
+df = df.withColumn('Gender', when(((col("avg_of_purchases")>= 5000)), lit('male')).otherwise(lit('female')))
+df = df.withColumn('occ type', when(((col("Occupation")>= 10)), lit('HighTech')).otherwise(lit('LowTech')))
+df = df.withColumn('good\normal', when((col("Occupation") >= 10) & (col("avg_of_purchases") >= 8000), lit('Good')).otherwise(lit('Normal')))
+
+#show data
+pd.DataFrame(df.take(10), columns=df.columns).transpose()
+
+#Change to string method
+
+marital_int = StringIndexer(inputCol='high/low', outputCol='high/low int')
+marital_int_model = marital_int.fit(df)
+df = marital_int_model.transform(df)
+education_int = StringIndexer(inputCol='occ type', outputCol='occ type int')
+education_int_model = education_int.fit(df)
+df = education_int_model.transform(df)
+job_int = StringIndexer(inputCol='Gender', outputCol='Gender int')
+job_int_model = job_int.fit(df)
+df = job_int_model.transform(df)
+class_int = StringIndexer(inputCol='good\normal', outputCol='target')
+class_int_model = class_int.fit(df) 
+df = class_int_model.transform(df) 
+
+# drop text columns 
+
+df = df.drop('good\normal')
+df = df.drop('occ type')
+df = df.drop('Gender')
+df = df.drop('high/low')
+
+#correlation matrix
+
+from pyspark.ml.stat import Correlation
+from pyspark.ml.feature import VectorAssembler
+
+CorrDF = df.sample(False, 1.0, 46)
+
+vector_features = 'features'
+assembler = VectorAssembler(inputCols=CorrDF.columns, outputCol=vector_features)
+df_vector = assembler.transform(df).select(vector_features)
+matrix = Correlation.corr(df_vector, vector_features, 'pearson')
+
+result = matrix.collect()[0]["pearson({})".format(vector_features)].values
+reshape_matrix = pd.DataFrame(result.reshape(-1, len(CorrDF.columns)), columns=CorrDF.columns, index=CorrDF.columns)
+
+import seaborn as sns; sns.set_theme()
+import matplotlib.pyplot as plt
+ax = sns.heatmap(reshape_matrix, vmin=0, vmax=1, annot=True)
+figr = plt.gcf()
+figr.set_size_inches(14, 10)
+figr.show()
+
+
+#VectorAssembler and train/test
+
+from pyspark.ml.feature import VectorAssembler
+feature_columns = df.columns[-4:-1]
+assembler = VectorAssembler(inputCols=feature_columns,outputCol="features")
+data_vector = assembler.transform(df)
+
+(train, test) = data_vector.randomSplit([0.8,0.2], seed =2020)
+print("train #: " + str(train.count()),"test #: " + str(test.count()))
+
+#decision tree
+
+from pyspark.ml.classification import DecisionTreeClassifier
+dt = DecisionTreeClassifier(featuresCol = 'features', labelCol = 'target', maxDepth = 3) 
+dtModel = dt.fit(train)
+dt_predictions = dtModel.transform(test) 
+dt_predictions.select('avg_of_purchases','Occupation','high/low int','occ type int','Gender int','target').show(5)
+
+#check for accuracy
+
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+AccuracyDT = MulticlassClassificationEvaluator(labelCol = 'target', metricName = 'accuracy')
+print(' DT Accuracy:', AccuracyDT.evaluate(dt_predictions))
+
+model = dt.fit(data_vector)
+predictions = model.transform(data_vector)
+predictions.select('avg_of_purchases','Occupation','high/low int','occ type int','Gender int','prediction').show(5)
+y_t = predictions.select(['target']).collect()
+y_predictions = predictions.select(['prediction']).collect()
+from sklearn.metrics import classification_report, confusion_matrix
+print(classification_report(y_t, y_predictions))
+
+# ligistic regression model 
+
+from pyspark.ml.classification import LogisticRegression
+lr = LogisticRegression(featuresCol = 'features', labelCol = 'target', maxIter=10)
+lrModel = lr.fit(train)
+lr_predictions = lrModel.transform(test)
+
+lr_predictions.select('avg_of_purchases','high/low int','occ type int','Gender int','target')
+
+pd.DataFrame(lr_predictions.take(10), columns=lr_predictions.columns).transpose()
+
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+AccuracyLG = MulticlassClassificationEvaluator(labelCol = 'target', metricName = 'accuracy')
+print(' LogisticRegression Accuracy:', AccuracyLG.evaluate(lr_predictions))
+
+y_t = lr_predictions.select(['target']).collect()
+y_predictions = lr_predictions.select(['prediction']).collect()
+from sklearn.metrics import classification_report, confusion_matrix
+print(classification_report(y_t, y_predictions))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
