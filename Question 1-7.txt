@@ -1,0 +1,68 @@
+import findspark
+findspark.init()
+import pandas as pd
+from pyspark.sql.functions import desc
+from pyspark.sql.functions import col
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.appName("LoadCSV").getOrCreate()
+df = spark.read.csv(path="C:/Users/jonij/data_1.csv",sep=",", header=True, quote="", inferSchema=True,)
+
+
+df.show(10)
+
+###1 find the average for each column
+
+df.agg({'purchase1':'avg', 'purchase2':'avg','purchase3':'avg','purchase4':'avg','purchase5':'avg'}).show()
+
+###2 find total buyers between ranges
+
+var1 = df.filter((df.Age >= 20) & (df.Age <= 22)).count()
+var2 = df.filter((df.Age >= 30) & (df.Age <= 34)).count()
+var3 = df.filter((df.Age >= 47) & (df.Age <= 50)).count()
+total_count_ages = var1 + var2 +var3
+total_count_ages
+
+
+###3 max avg per age
+
+#sum each rows
+avg_pur = df.withColumn('avg_purchases',((col("purchase1")+ col("purchase2")+ col("purchase3")+col("purchase4")+col("purchase5"))/5))
+#group by age and find avg of avaraged
+max_avg = avg_pur.groupby('Age').agg({'avg_purchases':'max'})
+max_avg.orderBy('max(avg_purchases)',ascending= False).show(1)
+
+
+###4 avg purchases per occupation
+
+group4 = df.groupBy('Occupation').agg({'purchase1':'avg', 'purchase2':'avg','purchase3':'avg','purchase4':'avg','purchase5':'avg'})
+ready_df = group4.orderBy('Occupation')
+pd.DataFrame(ready_df.take(20), columns=ready_df.columns) #better visualisation
+
+###5 max and min per id, ocupation
+
+df5 = df.withColumn( 'max_min' , 
+                     df['purchase1'] +
+                     df['purchase2'] +
+                     df['purchase3'] +
+                     df['purchase4'] +
+                     df['purchase5'])
+
+
+mini = df5.groupby('Occupation','Age').agg({'max_min':'min'})
+maxi = df5.groupby('Occupation','Age').agg({'max_min':'max'})
+maxi.orderBy('Occupation','Age').show()
+mini.orderBy('Occupation','Age').show()
+
+###6 multiple conditions counts
+
+v1 = df.filter((df.Age >= 40) & (df.Age <= 47)).count()
+v2 = df.filter((df.purchase3 > 2200)).count()
+v3 = df.filter((df.purchase4 < 1000)).count()
+v4 = df.filter((df.purchase5 > 10000) & (df.purchase5 < 11500)).count()
+v1 + v2 + v3 + v4
+
+###7 max purchase per age
+
+data = df.groupby('Age').agg({'purchase1':'max','purchase2':'max','purchase3':'max','purchase4':'max','purchase5':'max'})
+pd.DataFrame(data.take(20), columns=data.columns)
+
